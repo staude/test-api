@@ -27,8 +27,10 @@ pub struct LoginLimiter {
 #[derive(Default)]
 struct State {
     failures: HashMap<String, VecDeque<Instant>>,
-    /// Set when the map holds only blocked keys and cannot take more.
-    saturated: bool,
+    /// While set, so many keys are blocked that the map cannot take more;
+    /// unknown e-mails count as blocked until this point in time, when
+    /// enough blocked keys have expired.
+    saturated_until: Option<Instant>,
 }
 
 impl Default for LoginLimiter {
@@ -45,25 +47,44 @@ impl Default for LoginLimiter {
 
 impl LoginLimiter {
     pub fn is_blocked(&self, email: &str, ip: Option<&str>) -> bool {
-        let now = Instant::now();
-        let Ok(mut state) = self.state.lock() else {
-            return true;
-        };
-        let saturated = state.saturated;
-        let mut over = |key: String, max: usize| match state.failures.get_mut(&key) {
-            Some(q) => {
-                self.expire(q, now);
-                q.len() >= max
-            }
-            None => saturated,
-        };
-        let email_blocked = over(email_key(email), self.max_per_email);
-        let ip_blocked = ip.is_some_and(|ip| over(ip_key(ip), self.max_per_ip));
-        email_blocked || ip_blocked
+        self.is_blocked_at(email, ip, Instant::now())
     }
 
     pub fn record_failure(&self, email: &str, ip: Option<&str>) {
-        let now = Instant::now();
+        self.record_failure_at(email, ip, Instant::now());
+    }
+
+    pub fn record_success(&self, email: &str) {
+        if let Ok(mut state) = self.state.lock() {
+            state.failures.remove(&email_key(email));
+        }
+    }
+
+    fn is_blocked_at(&self, email: &str, ip: Option<&str>, now: Instant) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return true;
+        };
+        // Saturation ends on its own once enough blocked keys expire; no
+        // failure needs to be recorded for that (unknown keys are refused
+        // before any password check, so none would be).
+        if state.saturated_until.is_some_and(|t| now >= t) {
+            self.shrink(&mut state, now);
+        }
+        let saturated = state.saturated_until.is_some();
+        let mut over =
+            |key: String, max: usize, unknown_blocked: bool| match state.failures.get_mut(&key) {
+                Some(q) => {
+                    self.expire(q, now);
+                    q.len() >= max
+                }
+                None => unknown_blocked,
+            };
+        let email_blocked = over(email_key(email), self.max_per_email, saturated);
+        let ip_blocked = ip.is_some_and(|ip| over(ip_key(ip), self.max_per_ip, false));
+        email_blocked || ip_blocked
+    }
+
+    fn record_failure_at(&self, email: &str, ip: Option<&str>, now: Instant) {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
@@ -77,12 +98,6 @@ impl LoginLimiter {
         }
         if state.failures.len() > self.max_keys {
             self.shrink(&mut state, now);
-        }
-    }
-
-    pub fn record_success(&self, email: &str) {
-        if let Ok(mut state) = self.state.lock() {
-            state.failures.remove(&email_key(email));
         }
     }
 
@@ -107,34 +122,62 @@ impl LoginLimiter {
     /// entries go first, then the least recently failed unblocked keys, so
     /// a key under active attack keeps its counter. Blocked keys always
     /// stay; once they alone fill the limit, the limiter saturates.
+    ///
+    /// Shrinks to 90 % of the limit, so this O(n) pass runs only once per
+    /// `max_keys / 10` new keys, not on every failure.
     fn shrink(&self, state: &mut State, now: Instant) {
         state.failures.retain(|_, q| {
             self.expire(q, now);
             !q.is_empty()
         });
-        let blocked = state
-            .failures
-            .iter()
-            .filter(|(k, q)| q.len() >= self.limit_for(k))
-            .count();
-        if state.failures.len() > self.max_keys {
-            let mut evictable: Vec<(Instant, String)> = state
+
+        let low_water = self.max_keys - self.max_keys / 10;
+        if state.failures.len() > low_water {
+            let mut evictable: Vec<(Instant, &String)> = state
                 .failures
                 .iter()
                 .filter(|(k, q)| q.len() < self.limit_for(k))
-                .filter_map(|(k, q)| q.back().map(|last| (*last, k.clone())))
+                .filter_map(|(k, q)| q.back().map(|last| (*last, k)))
                 .collect();
-            evictable.sort();
-            let excess = state.failures.len() - self.max_keys;
-            for (_, key) in evictable.into_iter().take(excess) {
+            let count = (state.failures.len() - low_water).min(evictable.len());
+            if count > 0 && count < evictable.len() {
+                evictable.select_nth_unstable(count - 1);
+            }
+            let doomed: Vec<String> = evictable
+                .into_iter()
+                .take(count)
+                .map(|(_, k)| k.clone())
+                .collect();
+            for key in doomed {
                 state.failures.remove(&key);
             }
         }
-        state.saturated = blocked >= self.max_keys;
-        if state.saturated {
+
+        // When does a blocked key stop being blocked? When its oldest
+        // failure that still counts towards the limit expires.
+        let mut releases: Vec<Instant> = state
+            .failures
+            .iter()
+            .filter_map(|(k, q)| {
+                let limit = self.limit_for(k);
+                (q.len() >= limit)
+                    .then(|| q.get(q.len() - limit))
+                    .flatten()
+                    .map(|t| *t + self.window)
+            })
+            .collect();
+        state.saturated_until = if releases.len() >= self.max_keys {
+            // Saturation ends once the blocked count drops below the limit.
+            let nth = releases.len() - self.max_keys;
+            releases.select_nth_unstable(nth);
+            releases.get(nth).copied()
+        } else {
+            None
+        };
+        if state.saturated_until.is_some() {
             tracing::warn!(
-                keys = state.failures.len(),
-                "login limiter saturated with blocked keys; unknown keys are blocked"
+                blocked = releases.len(),
+                "login limiter saturated with blocked keys; unknown e-mails are blocked"
             );
         }
     }
@@ -203,6 +246,23 @@ mod tests {
         assert!(l.is_blocked("victim@example.org", None));
         // Memory is full of blocked keys: unknown keys are refused too.
         assert!(l.is_blocked("new@example.org", None));
+    }
+
+    #[test]
+    fn saturation_ends_when_blocked_keys_expire() {
+        let l = small();
+        let t0 = Instant::now();
+        for i in 0..150 {
+            for _ in 0..10 {
+                l.record_failure_at(&format!("spray{i}@example.org"), None, t0);
+            }
+        }
+        assert!(l.is_blocked_at("new@example.org", None, t0));
+        // Nothing is recorded meanwhile; the next check after the window
+        // must lift the saturation by itself.
+        let later = t0 + l.window + Duration::from_secs(1);
+        assert!(!l.is_blocked_at("new@example.org", None, later));
+        assert!(!l.is_blocked_at("spray0@example.org", None, later));
     }
 
     #[test]
