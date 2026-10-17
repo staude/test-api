@@ -96,6 +96,16 @@ impl Core {
 
     pub async fn update_user(&self, p: &Principal, id: Uuid, req: UserUpdate) -> Result<User> {
         p.require(Permission::UsersManage)?;
+        if id != p.user_id {
+            // Setting a password or locking someone out is as powerful as
+            // holding their rights: only allowed for users whose roles the
+            // actor could assign. Otherwise a pure user manager could reset
+            // an admin's password and log in as admin.
+            let target = test_db::users::get(&self.pool, id)
+                .await?
+                .ok_or(Error::NotFound)?;
+            self.ensure_roles_assignable(p, &target.roles).await?;
+        }
         if let Some(name) = &req.display_name {
             check_display_name(name)?;
         }
@@ -220,7 +230,7 @@ impl Core {
                 .find(|k| !Permission::from_key(k).is_some_and(|perm| p.has(perm)))
             {
                 return Err(Error::Forbidden(format!(
-                    "{missing} (benötigt, um Rolle {name} zu vergeben)"
+                    "{missing} (benötigt für Rolle {name})"
                 )));
             }
         }
@@ -229,7 +239,7 @@ impl Core {
 }
 
 /// At least one active user must keep the right to manage users.
-async fn ensure_admin_remains(tx: &mut sqlx::PgConnection) -> Result<()> {
+pub(crate) async fn ensure_admin_remains(tx: &mut sqlx::PgConnection) -> Result<()> {
     let n = test_db::users::count_active_with_permission(&mut *tx, Permission::UsersManage.key())
         .await?;
     if n == 0 {

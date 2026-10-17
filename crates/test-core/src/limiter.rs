@@ -10,6 +10,8 @@ pub struct LoginLimiter {
     window: Duration,
     max_per_email: usize,
     max_per_ip: usize,
+    /// Upper bound for tracked keys (e-mails and IPs).
+    max_keys: usize,
     failures: Mutex<HashMap<String, VecDeque<Instant>>>,
 }
 
@@ -19,6 +21,7 @@ impl Default for LoginLimiter {
             window: Duration::from_secs(15 * 60),
             max_per_email: 10,
             max_per_ip: 30,
+            max_keys: 100_000,
             failures: Mutex::new(HashMap::new()),
         }
     }
@@ -53,10 +56,30 @@ impl LoginLimiter {
             if let Some(ip) = ip {
                 map.entry(ip_key(ip)).or_default().push_back(now);
             }
-            // Keep memory bounded under attack.
-            if map.len() > 100_000 {
-                map.clear();
+            if map.len() > self.max_keys {
+                self.shrink(&mut map, now);
             }
+        }
+    }
+
+    /// Keeps memory bounded under attack without resetting the counters
+    /// that matter: expired entries go first, then the keys with the fewest
+    /// failures. Clearing everything would let an attacker reset the
+    /// counter of a targeted account by spraying random e-mails.
+    fn shrink(&self, map: &mut HashMap<String, VecDeque<Instant>>, now: Instant) {
+        map.retain(|_, q| {
+            while q
+                .front()
+                .is_some_and(|t| now.duration_since(*t) > self.window)
+            {
+                q.pop_front();
+            }
+            !q.is_empty()
+        });
+        let mut threshold = 1;
+        while map.len() > self.max_keys {
+            map.retain(|_, q| q.len() > threshold);
+            threshold += 1;
         }
     }
 
@@ -78,6 +101,23 @@ fn ip_key(ip: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spraying_other_emails_does_not_reset_a_target() {
+        let l = LoginLimiter {
+            max_keys: 100,
+            ..LoginLimiter::default()
+        };
+        for _ in 0..10 {
+            l.record_failure("victim@example.org", None);
+        }
+        assert!(l.is_blocked("victim@example.org", None));
+        for i in 0..1_000 {
+            l.record_failure(&format!("spray{i}@example.org"), None);
+        }
+        assert!(l.is_blocked("victim@example.org", None));
+        assert!(l.failures.lock().map(|m| m.len() <= 101).unwrap_or(false));
+    }
 
     #[test]
     fn blocks_after_max_failures_and_resets_on_success() {

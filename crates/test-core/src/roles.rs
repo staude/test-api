@@ -99,6 +99,7 @@ impl Core {
             grantable(p, &touched)?;
             let perms = grantable(p, keys)?;
             test_db::roles::set_permissions(&mut tx, id, &perms).await?;
+            crate::users::ensure_admin_remains(&mut tx).await?;
         }
         tx.commit().await?;
         self.audit(
@@ -120,7 +121,10 @@ impl Core {
             ));
         }
         grantable(p, &role.permissions)?;
-        test_db::roles::delete(&self.pool, id).await?;
+        let mut tx = self.pool.begin().await?;
+        test_db::roles::delete(&mut *tx, id).await?;
+        crate::users::ensure_admin_remains(&mut tx).await?;
+        tx.commit().await?;
         self.audit(
             p,
             "role.delete",

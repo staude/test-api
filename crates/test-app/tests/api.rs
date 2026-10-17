@@ -955,3 +955,99 @@ async fn cleanup_removes_audit_entries_past_retention(pool: PgPool) {
         .unwrap();
     assert_eq!(left, ["recent"]);
 }
+
+// ---------------------------------------------------------------- Security regressions
+
+#[sqlx::test(migrator = "test_db::MIGRATOR")]
+async fn user_manager_cannot_take_over_more_privileged_users(pool: PgPool) {
+    let app = App::new(pool).await;
+    let (status, _) = app
+        .request(
+            Method::POST,
+            "/api/v1/roles",
+            Some(&app.admin),
+            Some(json!({ "name": "useradmin", "permissions": ["users.read", "users.manage"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let ua = app.user_with_roles("ua@example.org", &["useradmin"]).await;
+    let admin_id = app.user_id(ADMIN_EMAIL).await;
+
+    // Resetting the admin's password would allow logging in as admin.
+    let path = format!("/api/v1/users/{admin_id}");
+    let reset = Some(json!({ "password": "uebernommen-123456" }));
+    assert_eq!(
+        app.status(Method::PATCH, &path, &ua, reset).await,
+        StatusCode::FORBIDDEN
+    );
+    let lock = Some(json!({ "is_active": false }));
+    assert_eq!(
+        app.status(Method::PATCH, &path, &ua, lock).await,
+        StatusCode::FORBIDDEN
+    );
+    app.login(ADMIN_EMAIL).await;
+
+    // Users whose roles the manager could assign stay manageable.
+    app.user_with_roles("plain@example.org", &[]).await;
+    let plain = app.user_id("plain@example.org").await;
+    let rename = Some(json!({ "display_name": "Neu" }));
+    assert_eq!(
+        app.status(
+            Method::PATCH,
+            &format!("/api/v1/users/{plain}"),
+            &ua,
+            rename
+        )
+        .await,
+        StatusCode::OK
+    );
+}
+
+#[sqlx::test(migrator = "test_db::MIGRATOR")]
+async fn role_changes_cannot_remove_the_last_user_manager(pool: PgPool) {
+    let app = App::new(pool).await;
+    let all: Vec<&str> = test_core::Permission::ALL.iter().map(|p| p.key()).collect();
+    let (_, role) = app
+        .request(
+            Method::POST,
+            "/api/v1/roles",
+            Some(&app.admin),
+            Some(json!({ "name": "manager", "permissions": all })),
+        )
+        .await;
+    let role_id = role["id"].as_str().unwrap().to_owned();
+    let boss = app.user_with_roles("boss@example.org", &["manager"]).await;
+    let admin_id = app.user_id(ADMIN_EMAIL).await;
+    // The admin gives up the admin role; the custom role now carries users.manage alone.
+    assert_eq!(
+        app.status(
+            Method::PUT,
+            &format!("/api/v1/users/{admin_id}/roles"),
+            &boss,
+            Some(json!({ "roles": [] }))
+        )
+        .await,
+        StatusCode::OK
+    );
+
+    let path = format!("/api/v1/roles/{role_id}");
+    let without_manage: Vec<&str> = all
+        .iter()
+        .copied()
+        .filter(|k| *k != "users.manage")
+        .collect();
+    let strip = Some(json!({ "permissions": without_manage }));
+    assert_eq!(
+        app.status(Method::PATCH, &path, &boss, strip).await,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        app.status(Method::DELETE, &path, &boss, None).await,
+        StatusCode::CONFLICT
+    );
+    // Still a working manager afterwards.
+    assert_eq!(
+        app.status(Method::GET, "/api/v1/users", &boss, None).await,
+        StatusCode::OK
+    );
+}
