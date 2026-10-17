@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Anmelden{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Anmelden</h1>
+  {% if let Some(e) = error %}<p class="alert error">{{ e }}</p>{% endif %}
+  {% if setup_pending %}
+  <p class="alert info">Noch kein Benutzer vorhanden. Den Einrichtungslink findest du im Server-Log.</p>
+  {% endif %}
+  <form method="post" action="/login" class="stack">
+    <label>E-Mail <input type="email" name="email" value="{{ email }}" required autofocus autocomplete="username"></label>
+    <label>Passwort <input type="password" name="password" required autocomplete="current-password"></label>
+    <button class="primary">Anmelden</button>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ user.display_name }}{% endblock %}
+{% block content %}
+<p><a href="/admin/users">← Alle Benutzer</a></p>
+<h1>{{ user.display_name }}</h1>
+{% if let Some(m) = message %}<p class="alert ok">{{ m }}</p>{% endif %}
+<div class="grid">
+  <section class="card">
+    <h2>Stammdaten</h2>
+    <dl>
+      <dt>E-Mail</dt><dd>{{ user.email }}</dd>
+      <dt>Angelegt</dt><dd>{{ user.created }}</dd>
+      <dt>Letzte Anmeldung</dt><dd>{{ user.last_login }}</dd>
+    </dl>
+    {% if can_manage %}
+    <form method="post" action="/admin/users/{{ user.id }}" class="stack">
+      <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+      <label>Name <input name="display_name" value="{{ user.display_name }}" required></label>
+      <label class="check"><input type="checkbox" name="is_active" value="1" {% if user.is_active %}checked{% endif %} {% if is_self %}disabled{% endif %}> Aktiv</label>
+      {% if is_self %}<input type="hidden" name="is_active" value="1">{% endif %}
+      <label>Neues Passwort (optional, beendet alle Sitzungen) <input type="password" name="password" minlength="12" autocomplete="new-password"></label>
+      <button class="primary">Speichern</button>
+    </form>
+    {% endif %}
+  </section>
+  <section class="card">
+    <h2>Rollen</h2>
+    {% if can_manage %}
+    <form method="post" action="/admin/users/{{ user.id }}/roles" class="stack">
+      <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+      {% for r in roles %}
+      <label class="check"><input type="checkbox" name="roles" value="{{ r.name }}" {% if r.checked %}checked{% endif %}> <strong>{{ r.name }}</strong> <span class="muted">{{ r.description }}</span></label>
+      {% endfor %}
+      <button class="primary">Rollen speichern</button>
+    </form>
+    {% else %}
+    <p>{{ user.roles }}</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

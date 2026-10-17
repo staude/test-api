@@ -1,0 +1,18 @@
+[package]
+name = "test-db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+time.workspace = true
+utoipa.workspace = true
+uuid.workspace = true

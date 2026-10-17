@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Profil{% endblock %}
+{% block content %}
+<h1>Profil</h1>
+{% if let Some(m) = message %}<p class="alert ok">{{ m }}</p>{% endif %}
+<div class="grid">
+  <section class="card">
+    <h2>Konto</h2>
+    <dl>
+      <dt>E-Mail</dt><dd>{{ email }}</dd>
+      <dt>Rollen</dt><dd>{{ roles }}</dd>
+      <dt>Rechte</dt><dd>{% for p in permissions %}<code>{{ p }}</code> {% endfor %}</dd>
+    </dl>
+  </section>
+  <section class="card">
+    <h2>Passwort ändern</h2>
+    <form method="post" action="/profile/password" class="stack">
+      <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+      <label>Aktuelles Passwort <input type="password" name="current_password" required autocomplete="current-password"></label>
+      <label>Neues Passwort <input type="password" name="new_password" minlength="12" required autocomplete="new-password"></label>
+      <button class="primary">Ändern</button>
+    </form>
+  </section>
+</div>
+{% if can_tokens %}
+<section class="card">
+  <h2>API-Tokens</h2>
+  <p class="muted">Für die Kommandozeile, Skripte und MCP-Clients. Ein Token kann nie mehr als du selbst.</p>
+  {% if let Some(secret) = new_secret %}
+  <div class="alert ok">
+    <p><strong>Neuer Token – jetzt kopieren, er wird nicht noch einmal angezeigt:</strong></p>
+    <code class="secret">{{ secret }}</code>
+  </div>
+  {% endif %}
+  {% if !tokens.is_empty() %}
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Name</th><th>Präfix</th><th>Rechte</th><th>Erstellt</th><th>Zuletzt genutzt</th><th>Läuft ab</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for t in tokens %}
+      <tr>
+        <td>{{ t.name }}</td><td><code>{{ t.prefix }}…</code></td><td>{{ t.scopes }}</td>
+        <td>{{ t.created }}</td><td>{{ t.last_used }}</td><td>{{ t.expires }}</td><td>{{ t.status }}</td>
+        <td>{% if t.active %}
+          <form method="post" action="/profile/tokens/{{ t.id }}/revoke" hx-confirm="Token widerrufen?">
+            <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+            <button class="danger small">Widerrufen</button>
+          </form>
+        {% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+  <h3>Neuer Token</h3>
+  <form method="post" action="/profile/tokens" class="stack">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+    <label>Name <input name="name" placeholder="z. B. Claude Desktop" required></label>
+    <fieldset>
+      <legend>Rechte einschränken (nichts gewählt = alle eigenen Rechte)</legend>
+      {% for p in permissions %}
+      <label class="check"><input type="checkbox" name="scopes" value="{{ p }}"> <code>{{ p }}</code></label>
+      {% endfor %}
+    </fieldset>
+    <label>Laufzeit in Tagen (leer = unbegrenzt) <input name="expires_in_days" inputmode="numeric" pattern="[0-9]*"></label>
+    <button class="primary">Token erstellen</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

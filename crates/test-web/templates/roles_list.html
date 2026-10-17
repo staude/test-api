@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Rollen{% endblock %}
+{% block content %}
+<h1>Rollen &amp; Rechte</h1>
+<section class="card">
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Rolle</th><th>Beschreibung</th><th>Rechte</th></tr></thead>
+    <tbody>
+    {% for r in roles %}
+      <tr>
+        <td><a href="/admin/roles/{{ r.id }}">{{ r.name }}</a>{% if r.is_system %} <span class="badge">System</span>{% endif %}</td>
+        <td>{{ r.description }}</td>
+        <td>{% for p in r.permissions %}<code>{{ p }}</code> {% endfor %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+<section class="card">
+  <h2>Neue Rolle</h2>
+  <form method="post" action="/admin/roles" class="stack">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+    <div class="grid">
+      <label>Name <input name="name" pattern="[a-z0-9_\-]{2,40}" placeholder="z. B. reviewer" required></label>
+      <label>Beschreibung <input name="description"></label>
+    </div>
+    <fieldset>
+      <legend>Rechte</legend>
+      {% for p in permissions %}
+      <label class="check"><input type="checkbox" name="permissions" value="{{ p.key }}"> <code>{{ p.key }}</code> <span class="muted">{{ p.description }}</span></label>
+      {% endfor %}
+    </fieldset>
+    <button class="primary">Rolle anlegen</button>
+  </form>
+</section>
+{% endblock %}

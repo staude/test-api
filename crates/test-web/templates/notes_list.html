@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Notizen{% endblock %}
+{% block content %}
+<div class="pagehead">
+  <div>
+    <h1>Notizen</h1>
+    <p class="muted">{{ scope_hint }}</p>
+  </div>
+  {% if can_create %}<a class="button primary" href="/notes/new">Neue Notiz</a>{% endif %}
+</div>
+<form class="search" action="/notes" method="get">
+  <input type="search" name="q" value="{{ q }}" placeholder="Suchen …" aria-label="Notizen durchsuchen"
+         hx-get="/notes" hx-trigger="input changed delay:300ms, search" hx-target="#note-list"
+         hx-select="#note-list" hx-swap="outerHTML" hx-push-url="true">
+</form>
+<div id="note-list">
+  {% if notes.is_empty() %}
+  <p class="empty">Keine Notizen gefunden.</p>
+  {% else %}
+  <ul class="cards">
+    {% for n in notes %}
+    <li class="card note">
+      <a href="/notes/{{ n.id }}"><h2>{{ n.title }}</h2></a>
+      <p class="excerpt">{{ n.excerpt }}</p>
+      <p class="meta">{{ n.owner_name }} · {{ n.updated }}</p>
+    </li>
+    {% endfor %}
+  </ul>
+  {% if let Some(c) = next_cursor %}
+  <p class="more"><a class="button" href="/notes?q={{ q|urlencode }}&cursor={{ c }}">Ältere Notizen</a></p>
+  {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

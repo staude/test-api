@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ note.title }}{% endblock %}
+{% block content %}
+<p><a href="/notes">← Alle Notizen</a></p>
+<article class="card">
+  <div class="pagehead">
+    <h1>{{ note.title }}</h1>
+    {% if note.can_edit %}
+    <div class="actions">
+      <a class="button" href="/notes/{{ note.id }}/edit">Bearbeiten</a>
+      <form method="post" action="/notes/{{ note.id }}/delete" hx-confirm="Notiz wirklich löschen?">
+        <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+        <button class="danger">Löschen</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+  <p class="meta">{{ note.owner_name }} · angelegt {{ note.created }} · geändert {{ note.updated }}</p>
+  <div class="body">{{ note.body }}</div>
+</article>
+{% endblock %}

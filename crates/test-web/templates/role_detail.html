@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Rolle {{ role.name }}{% endblock %}
+{% block content %}
+<p><a href="/admin/roles">← Alle Rollen</a></p>
+<h1>Rolle <code>{{ role.name }}</code></h1>
+{% if let Some(m) = message %}<p class="alert ok">{{ m }}</p>{% endif %}
+<section class="card">
+  {% if role.is_system %}
+  <p class="alert info">Systemrolle – Rechte sind fest vorgegeben.</p>
+  <p>{{ role.description }}</p>
+  <ul class="plain">
+    {% for p in permissions %}{% if p.checked %}<li><code>{{ p.key }}</code> <span class="muted">{{ p.description }}</span></li>{% endif %}{% endfor %}
+  </ul>
+  {% else %}
+  <form method="post" action="/admin/roles/{{ role.id }}" class="stack">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+    <label>Beschreibung <input name="description" value="{{ role.description }}"></label>
+    <fieldset>
+      <legend>Rechte</legend>
+      {% for p in permissions %}
+      <label class="check"><input type="checkbox" name="permissions" value="{{ p.key }}" {% if p.checked %}checked{% endif %}> <code>{{ p.key }}</code> <span class="muted">{{ p.description }}</span></label>
+      {% endfor %}
+    </fieldset>
+    <button class="primary">Speichern</button>
+  </form>
+  <form method="post" action="/admin/roles/{{ role.id }}/delete" hx-confirm="Rolle wirklich löschen? Benutzer verlieren die enthaltenen Rechte.">
+    <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+    <button class="danger">Rolle löschen</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{% if id.is_some() %}Notiz bearbeiten{% else %}Neue Notiz{% endif %}{% endblock %}
+{% block content %}
+<section class="card">
+  {% match id %}
+  {% when Some(id) %}
+  <h1>Notiz bearbeiten</h1>
+  <form method="post" action="/notes/{{ id }}" class="stack">
+  {% when None %}
+  <h1>Neue Notiz</h1>
+  <form method="post" action="/notes" class="stack">
+  {% endmatch %}
+    <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+    <label>Titel <input name="title" value="{{ title }}" maxlength="200" required autofocus></label>
+    <label>Text <textarea name="body" rows="14">{{ body }}</textarea></label>
+    <div class="actions">
+      <button class="primary">Speichern</button>
+      <a class="button" href="{% if let Some(id) = id %}/notes/{{ id }}{% else %}/notes{% endif %}">Abbrechen</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

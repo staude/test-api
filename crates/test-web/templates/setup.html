@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Einrichtung{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Ersteinrichtung</h1>
+  <p class="muted">Lege den ersten Administrator an.</p>
+  {% if let Some(e) = error %}<p class="alert error">{{ e }}</p>{% endif %}
+  <form method="post" action="/setup" class="stack">
+    <label>Setup-Code <input name="code" value="{{ code }}" required></label>
+    <label>E-Mail <input type="email" name="email" required autocomplete="username"></label>
+    <label>Name <input name="display_name" required></label>
+    <label>Passwort <input type="password" name="password" minlength="12" required autocomplete="new-password"></label>
+    <button class="primary">Administrator anlegen</button>
+  </form>
+</section>
+{% endblock %}

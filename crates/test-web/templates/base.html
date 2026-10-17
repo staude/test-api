@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"responseHandling":[{"code":"204","swap":false},{"code":"[2345]..","swap":true,"error":false}]}'>
+  <title>{% block title %}test-app{% endblock %} · test-app</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/htmx.min.js" defer></script>
+</head>
+<body hx-boost="true"{% if layout.signed_in %} hx-headers='{"X-CSRF-Token": "{{ layout.csrf }}"}'{% endif %}>
+  <header class="topbar">
+    <a class="brand" href="/">test-app</a>
+    {% if layout.signed_in %}
+    <nav>
+      <a href="/notes" {% if layout.active == "notes" %}aria-current="page"{% endif %}>Notizen</a>
+      {% if layout.can_users %}<a href="/admin/users" {% if layout.active == "users" %}aria-current="page"{% endif %}>Benutzer</a>{% endif %}
+      {% if layout.can_roles %}<a href="/admin/roles" {% if layout.active == "roles" %}aria-current="page"{% endif %}>Rollen</a>{% endif %}
+      {% if layout.can_audit %}<a href="/admin/audit" {% if layout.active == "audit" %}aria-current="page"{% endif %}>Audit</a>{% endif %}
+    </nav>
+    <div class="account">
+      <a href="/profile" {% if layout.active == "profile" %}aria-current="page"{% endif %}>{{ layout.display_name }}</a>
+      <form method="post" action="/logout">
+        <input type="hidden" name="_csrf" value="{{ layout.csrf }}">
+        <button class="link">Abmelden</button>
+      </form>
+    </div>
+    {% endif %}
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
