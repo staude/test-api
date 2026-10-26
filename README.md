@@ -145,8 +145,138 @@ TESTAPP_PORT=18091 docker compose -p test-api-load down -v
 Ergebnisse vom 17.10.2026 (nach den Optimierungen, 10.000 Notizen): 200 gleichzeitige Nutzer bei
 p95 6 ms, unter Volllast 4.100 Seiten/s bei p95 19 ms (vorher 1.600 Seiten/s, p95 76 ms), keine Fehler.
 
-## Backup
+## Lokale API-Dokumentation
+
+Die lokale Docker-Compose-Installation liegt unter `~/dev/test-api`.
+
+- Web-UI: <http://localhost:8080/>
+- API-Basis: <http://localhost:8080/api/v1>
+- Interaktive API-Dokumentation: <http://localhost:8080/api/docs>
+- OpenAPI-Spezifikation: <http://localhost:8080/api/v1/openapi.json>
+
+### Wichtige Endpunkte
+
+Alle folgenden API-Pfade sind relativ zu `/api/v1`:
+
+- `POST /auth/login`: Anmeldung mit E-Mail und Passwort; standardmäßig wird ein
+  API-Token zurückgegeben, alternativ ist eine Sitzung möglich.
+- `POST /auth/logout`: Sitzung beenden oder den verwendeten Token widerrufen.
+- `GET /me`: angemeldeten Benutzer und dessen effektive Rechte abrufen.
+- `GET /notes`, `POST /notes`: Notizen auflisten bzw. anlegen.
+- `GET /notes/{id}`, `PATCH /notes/{id}`, `DELETE /notes/{id}`:
+  einzelne Notiz lesen, bearbeiten bzw. löschen.
+- `/users`, `/roles`, `/permissions`, `/audit`: Benutzer, Rollen, Rechte und
+  Audit-Protokoll; unterstützte Methoden und Datenmodelle stehen in der OpenAPI-Doku.
+
+Geschützte Endpunkte benötigen eine Anmeldung und die passenden Rechte.
+API-Tokens werden im Header `Authorization: Bearer <Token>` übermittelt.
+Tokens und Passwörter nicht in Quellcode, Dokumentation oder geteilte Logs übernehmen.
+
+### Gesundheitsprüfung und Testaufrufe
+
+Diese Endpunkte benötigen keine Anmeldung:
 
 ```bash
-docker compose exec db pg_dump -U test test > backup-$(date +%F).sql
+curl --fail --show-error http://localhost:8080/healthz
+curl --fail --show-error http://localhost:8080/readyz
+curl --fail --show-error http://localhost:8080/api/v1/openapi.json
 ```
+
+`/healthz` prüft die Erreichbarkeit der App. `/readyz` prüft zusätzlich die
+Datenbankverbindung: Bei Erfolg antworten beide mit HTTP 200 und `ok`;
+bei nicht verfügbarer Datenbank liefert `/readyz` HTTP 503.
+
+Zugriffsschutz ohne Zugangsdaten prüfen:
+
+```bash
+curl --include http://localhost:8080/api/v1/notes
+curl --include http://localhost:8080/api/v1/me
+```
+
+Erwartet wird jeweils HTTP 401 mit einer JSON-Fehlerantwort
+(`status: 401`, `detail: "Anmeldung erforderlich"`), nicht HTTP 200.
+
+Beim lokalen Smoke-Test am 26.10.2026 wurden die drei öffentlichen Endpunkte
+erfolgreich geprüft; die OpenAPI-3.1.0-Spezifikation enthielt 15 Pfade.
+Beide geschützten Endpunkte wiesen anonyme Anfragen korrekt mit HTTP 401 ab.
+App- und Datenbankcontainer waren `healthy`. Authentifizierte Lese- und
+Schreiboperationen wurden nicht getestet; der Smoke-Test änderte keine Nutzdaten.
+
+## Wartung der lokalen Docker-Installation
+
+Voraussetzung: Docker Desktop läuft. Alle folgenden Befehle werden im
+Projektordner ausgeführt:
+
+```bash
+cd ~/dev/test-api
+```
+
+### Start, Stopp und Diagnose
+
+```bash
+docker compose ps           # Containerzustand anzeigen
+docker compose stop         # Stoppen, Daten behalten
+docker compose up -d        # Starten
+docker compose restart app  # Nur die App neu starten
+curl --fail --show-error http://localhost:8080/readyz
+```
+
+Logs bei Bedarf lokal ansehen:
+
+```bash
+docker compose logs --tail=100 app db
+```
+
+Vor dem Teilen auf vertrauliche Inhalte prüfen: App-Logs können den geheimen
+Einrichtungslink für den ersten Administrator enthalten. Der Docker-Healthcheck
+prüft `/healthz`; für eine Prüfung inklusive Datenbank zusätzlich `/readyz` verwenden.
+
+### Konfiguration
+
+Lokale Einstellungen liegen in `.env` (nicht versioniert). Die aktuelle Installation
+verwendet ein zufälliges Datenbankpasswort und `TESTAPP_PORT=127.0.0.1:8080`.
+Damit ist der veröffentlichte App-Port nur auf dem eigenen Mac erreichbar.
+
+- `.env` enthält Zugangsdaten: nicht veröffentlichen oder committen.
+- Dateirechte auf den eigenen Benutzer beschränken (`chmod 600 .env`).
+- Nach Änderungen mit `docker compose up -d` die betroffenen Container neu erstellen.
+- Das Datenbankpasswort nicht nur in `.env` ändern: Bei einem bestehenden
+  PostgreSQL-Volume wird das gespeicherte Passwort dadurch nicht automatisch geändert.
+
+### Backup
+
+Vor Updates die Datenbank sichern. Das Custom-Format lässt sich mit `pg_restore`
+wiederherstellen. Backups können personenbezogene Daten und Authentifizierungsdaten
+enthalten; deshalb mit eingeschränkten Rechten speichern:
+
+```bash
+mkdir -p backups
+(umask 077; docker compose exec -T db pg_dump -U test -d test -Fc > "backups/test-$(date +%Y%m%d-%H%M%S).dump")
+```
+
+Den erfolgreichen Abschluss des Dumps prüfen. Backups zusätzlich außerhalb des
+Projektordners sicher aufbewahren und niemals committen. Wiederherstellungen
+regelmäßig in einer separaten Testdatenbank prüfen, nicht ungeprüft in der laufenden
+Datenbank.
+
+### Aktualisieren
+
+Zuerst ein Backup erstellen, dann:
+
+```bash
+git status --short
+git pull --ff-only
+docker compose up -d --build
+docker compose ps
+curl --fail --show-error http://localhost:8080/readyz
+```
+
+Bei eigenen Änderungen zuerst deren Umgang klären, bevor der Stand aktualisiert
+wird. Datenbankmigrationen laufen beim App-Start automatisch. Ein Zurücksetzen
+nur des App-Images macht bereits ausgeführte Migrationen nicht rückgängig.
+
+### Datenhaltung
+
+PostgreSQL speichert seine Daten im persistenten Compose-Volume `db-data`.
+`docker compose stop` und `docker compose down` behalten dieses Volume.
+**`docker compose down -v` löscht das Volume und damit die lokale Datenbank.**
